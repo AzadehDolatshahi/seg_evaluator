@@ -2,7 +2,7 @@ import numpy as np
 import sys
 import pandas as pd
 import torch
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, fbeta_score, jaccard_score, accuracy_score
+from sklearn.metrics import confusion_matrix
 from surface_distance import compute_surface_distances, compute_robust_hausdorff
 from zip_utils import read_image_from_zip, read_mask_from_zip
 import logging
@@ -17,19 +17,55 @@ def dice_coefficient(y_true, y_pred):
         return 1.0  # Both masks are empty
     return (2. * intersection) / (np.sum(y_true) + np.sum(y_pred))
 
-def calculate_sensitivity_specificity(mask_cls, pred_cls):
+
+def calculate_fbeta_iou_aggregated(total_tp, total_fp, total_fn, beta=1.0):
     """
-    Calculates sensitivity and specificity, handling edge cases where
-    TP+FN or TN+FP equals zero.
+    Calculates F-beta score and IoU using aggregated TP, FP, and FN based on the provided formula.
     """
     try:
-        tn, fp, fn, tp = confusion_matrix(mask_cls, pred_cls, labels=[0, 1]).ravel()
-        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else np.nan
-        specificity = tn / (tn + fp) if (tn + fp) != 0 else np.nan
+        beta_squared = beta ** 2
+
+        # F-beta score using the formula
+        if total_tp + total_fp + beta_squared * total_fn != 0:
+            fbeta = (1 + beta_squared) * total_tp / ((1 + beta_squared) * total_tp + total_fp + beta_squared * total_fn)
+        else:
+            fbeta = np.nan
+
+        # IoU
+        iou = total_tp / (total_tp + total_fp + total_fn) if (total_tp + total_fp + total_fn) != 0 else np.nan
     except Exception as e:
-        logging.error(f"Error computing sensitivity/specificity: {e}")
+        logging.error(f"Error computing F-beta and IoU: {e}")
+        fbeta, iou = np.nan, np.nan
+
+    return fbeta, iou
+
+
+def calculate_precision_recall_accuracy_aggregated(total_tp, total_tn, total_fp, total_fn):
+    """
+    Calculates precision, recall, and accuracy using aggregated TP, TN, FP, and FN.
+    """
+    try:
+        precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) != 0 else np.nan
+        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) != 0 else np.nan
+        accuracy = (total_tp + total_tn) / (total_tp + total_tn + total_fp + total_fn) if (total_tp + total_tn + total_fp + total_fn) != 0 else np.nan
+    except Exception as e:
+        logging.error(f"Error computing precision/recall/accuracy: {e}")
+        precision, recall, accuracy = np.nan, np.nan, np.nan
+    return precision, recall, accuracy
+
+
+def calculate_sensitivity_specificity_aggregated(total_tp, total_tn, total_fp, total_fn):
+    """
+    Calculates sensitivity and specificity from aggregated TP, TN, FP, and FN.
+    """
+    try:
+        sensitivity = total_tp / (total_tp + total_fn) if (total_tp + total_fn) != 0 else np.nan
+        specificity = total_tn / (total_tn + total_fp) if (total_tn + total_fp) != 0 else np.nan
+    except Exception as e:
+        logging.error(f"Error computing aggregated sensitivity/specificity: {e}")
         sensitivity, specificity = np.nan, np.nan
     return sensitivity, specificity
+
 
 def calculate_hausdorff(mask_bool, pred_bool):
     """
@@ -48,12 +84,19 @@ def calculate_hausdorff(mask_bool, pred_bool):
         hausdorff_full, hausdorff_95 = np.nan
     return hausdorff_full, hausdorff_95
 
+
 def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postprocess_function, device, metrics_dict):
     test_image_files = sorted([f for f in test_dir.namelist() if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff'))])
-    
+
     if not test_image_files:
         logging.warning(f"No test images found.")
         return
+
+    # Initialize accumulators for confusion matrix elements
+    total_tp = {0: 0, 1: 0}
+    total_tn = {0: 0, 1: 0}
+    total_fp = {0: 0, 1: 0}
+    total_fn = {0: 0, 1: 0}
 
     for img_file in test_image_files:
         filename = img_file.split('/')[-1]
@@ -105,36 +148,39 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
             pred_bool = pred_cls.reshape(mask_np.shape).astype(bool)
             hausdorff_full, hausdorff_95 = calculate_hausdorff(mask_bool, pred_bool)
 
-            # Precision, Recall, F-beta, Jaccard, Accuracy
+            # Confusion matrix values
             try:
-                precision = precision_score(mask_cls, pred_cls, zero_division=0)
-                recall = recall_score(mask_cls, pred_cls, zero_division=0)
-                fbeta_05 = fbeta_score(mask_cls, pred_cls, beta=0.5, zero_division=0)
-                fbeta_2 = fbeta_score(mask_cls, pred_cls, beta=2, zero_division=0)
-                jaccard = jaccard_score(mask_cls, pred_cls, zero_division=0)
-                accuracy = accuracy_score(mask_cls, pred_cls)
+                tn, fp, fn, tp = confusion_matrix(mask_cls, pred_cls, labels=[0, 1]).ravel()
+                total_tp[cls] += tp
+                total_tn[cls] += tn
+                total_fp[cls] += fp
+                total_fn[cls] += fn
             except Exception as e:
-                logging.error(f"Error computing classification metrics for image {filename}, class {cls}: {e}")
-                precision = recall = fbeta_05 = fbeta_2 = jaccard = accuracy = np.nan
+                logging.error(f"Error computing confusion matrix for image {filename}, class {cls}: {e}")
+                continue
 
-            # Sensitivity and Specificity
-            sensitivity, specificity = calculate_sensitivity_specificity(mask_cls, pred_cls)
-
-            # Store Metrics
+            # Store Dice and Hausdorff metrics
             metrics_dict['Dice Coefficient'].append((cls, dice))
             metrics_dict['Hausdorff Distance'].append((cls, hausdorff_full))
             metrics_dict['Hausdorff 95% Distance'].append((cls, hausdorff_95))
-            metrics_dict['Precision'].append((cls, precision))
-            metrics_dict['Recall'].append((cls, recall))
-            metrics_dict['F-beta (beta=0.5)'].append((cls, fbeta_05))
-            metrics_dict['F-beta (beta=2)'].append((cls, fbeta_2))
-            metrics_dict['Jaccard Index (IoU)'].append((cls, jaccard))
-            metrics_dict['Accuracy'].append((cls, accuracy))
-            metrics_dict['Sensitivity'].append((cls, sensitivity))
-            metrics_dict['Specificity'].append((cls, specificity))
 
         logging.info(f"Processed image: {filename}")
 
+    # Calculate aggregated sensitivity, specificity, precision, recall, accuracy, F-beta, and IoU
+    for cls in [1, 0]:
+        sensitivity, specificity = calculate_sensitivity_specificity_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
+        precision, recall, accuracy = calculate_precision_recall_accuracy_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
+        fbeta_05, iou = calculate_fbeta_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=0.5)
+        fbeta_2, _ = calculate_fbeta_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=2)
+
+        metrics_dict['Sensitivity'].append((cls, sensitivity))
+        metrics_dict['Specificity'].append((cls, specificity))
+        metrics_dict['Precision'].append((cls, precision))
+        metrics_dict['Recall'].append((cls, recall))
+        metrics_dict['Accuracy'].append((cls, accuracy))
+        metrics_dict['F-beta (beta=0.5)'].append((cls, fbeta_05))
+        metrics_dict['F-beta (beta=2)'].append((cls, fbeta_2))
+        metrics_dict['Jaccard Index (IoU)'].append((cls, iou))
 
     # Create DataFrame for Displaying Metrics
     df = pd.DataFrame(columns=['Overall', 'Object Class', 'Background Class'], index=list(metrics_dict.keys()))
