@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# to Run python metrics_main.py --config config.yaml
 import argparse
 from pathlib import Path
 from utils import load_config, setup_logging, prepare_metrics_dict
