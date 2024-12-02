@@ -5,6 +5,7 @@ import sys
 from tensorflow.keras.models import load_model as load_keras_model
 from pathlib import Path
 
+# keras to be added 
 def load_preprocess_postprocess(preprocess_postprocess_path):
     """
     Dynamically loads preprocess and postprocess functions from a specified module,
@@ -25,6 +26,7 @@ def load_preprocess_postprocess(preprocess_postprocess_path):
         sys.exit(1)
 
 def load_model(model_path, device='cpu'):
+    # keras to be added
     """
     Loads a model from the specified path. It determines the type of the model 
     based on the file extension and loads it appropriately.
@@ -40,12 +42,11 @@ def load_model(model_path, device='cpu'):
         elif model_path.endswith('.pt') or model_path.endswith('.pth'):
             # Load a PyTorch model
             try:
-                # Try loading as a TorchScript model
+               
                 model = torch.jit.load(model_path, map_location=device)
                 model.eval()
                 return model
             except RuntimeError:
-                # Fallback to standard PyTorch model loading
                 model = torch.load(model_path, map_location=device)
                 model.eval()
                 model.to(device)

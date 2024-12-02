@@ -11,19 +11,19 @@ import torch
 
 def parse_arguments():
     """
-    Parses command-line arguments.
+     command-line arguments.
     """
     parser = argparse.ArgumentParser(description='Run Metrics on Model')
     parser.add_argument('--config', type=str, required=True, help='Path to the YAML configuration file')
     return parser.parse_args()
 
 def main():
-    # Setup logger and parse arguments
+
     logger = setup_logging()
     args = parse_arguments()
     config_path = Path(args.config)
 
-    # Load configuration
+
     config = load_config(config_path)
     
     # Extract paths from the configuration
@@ -38,8 +38,6 @@ def main():
             preprocess_postprocess_path = Path(preprocess_postprocess_path_str)
         else:
             preprocess_postprocess_path = None
-
-        #output_csv_path = Path(config['paths'].get('output_csv', 'metrics_results.csv'))
         
     except KeyError as e:
         logger.error(f"Missing key in configuration file: {e}")
@@ -63,7 +61,7 @@ def main():
     # Initialize metrics dictionary
     metrics_dict = prepare_metrics_dict()
 
-    # Open ZIP files
+    #  ZIP files
     try:
         test_dir = zipfile.ZipFile(test_dir_path, 'r')
         mask_dir = zipfile.ZipFile(mask_dir_path, 'r')
@@ -71,10 +69,10 @@ def main():
         logger.error(f"Error opening ZIP files: {e}")
         exit(1)
 
-    # Run the actual metrics evaluation logic
+
     calculate_metrics(test_dir, mask_dir, model, preprocess_function, postprocess_function, device, metrics_dict)
 
-    #  save the results here
+    #  save the results here later
 
 if __name__ == '__main__':
     main()

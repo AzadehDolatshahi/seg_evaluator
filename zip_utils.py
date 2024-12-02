@@ -5,7 +5,7 @@ from io import BytesIO
 
 def read_image_from_zip(zip_file, file_name):
     """
-    Reads an image from a ZIP file and returns it as a PIL Image.
+    Reads image from a ZIP file and return as a PIL Image.
     """
     with zip_file.open(file_name) as file:
         image_data = file.read()
@@ -14,7 +14,7 @@ def read_image_from_zip(zip_file, file_name):
 
 def read_mask_from_zip(zip_file, file_name):
     """
-    Reads a mask image from a ZIP file and returns it as a NumPy array.
+    Reads mask image from ZIP file and return as a NumPy array.
     """
     with zip_file.open(file_name) as file:
         mask_data = file.read()

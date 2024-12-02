@@ -1,3 +1,4 @@
+import yaml
 import numpy as np
 import sys
 import pandas as pd
@@ -6,84 +7,66 @@ from sklearn.metrics import confusion_matrix
 from surface_distance import compute_surface_distances, compute_robust_hausdorff
 from zip_utils import read_image_from_zip, read_mask_from_zip
 import logging
-import torch 
-import yaml
 
 
-def calculate_dsc_aggregated(total_tp, total_fp, total_fn):  # calculate_dsc_aggregated
-    """
-    Calculates the aggregated Dice Coefficient (DSC) using the formula:
-    DSC = 2 * TP / (2 * TP + FP + FN)
-    
-    Args:
-        total_tp (int): Total true positives across the dataset.
-        total_fp (int): Total false positives across the dataset.
-        total_fn (int): Total false negatives across the dataset.
+def dice_coefficient(total_tp, total_fp, total_fn):
+
         
-    Returns:
-        dsc (float): The aggregated Dice Coefficient (DSC).
+        # (2 * TP + FP + FN)
+    denominator = 2 * total_tp + total_fp + total_fn
+        
+        # Handle edge case: If no predictions or ground truth exist for this class
+    if denominator == 0:
+        dice_score= 1.0  # Dice is 1.0 for empty predictions and ground truth
+    else:
+        dice_score = (2 * total_tp) / denominator
+    
+    return dice_score
+
+
+
+def calculate_fbeta_aggregated(total_tp, total_fp, total_fn, beta=1.0):
     """
-    try:
-        denominator = (2 * total_tp) + total_fp + total_fn
-        if denominator != 0:
-            dsc = (2 * total_tp) / denominator
-        else:
-            dsc = np.nan
-    except Exception as e:
-        logging.error(f"Error computing aggregated DSC: {e}")
-        dsc = np.nan
-
-    return dsc
-
-
-
-def calculate_fbeta_iou_aggregated(total_tp, total_fp, total_fn, beta=1.0):
-    """
-    Calculates F-beta score and IoU using aggregated TP, FP, and FN based on the provided formula.
+    Calculates F-beta score using aggregated TP, FP, and FN 
     """
     try:
         beta_squared = beta ** 2
 
-        # F-beta score using the formula
         if total_tp + total_fp + beta_squared * total_fn != 0:
             fbeta = (1 + beta_squared) * total_tp / ((1 + beta_squared) * total_tp + total_fp + beta_squared * total_fn)
         else:
             fbeta = np.nan
+    except Exception as e:
+        logging.error(f"Error computing F-beta: {e}")
+        fbeta = np.nan
+    return fbeta
 
+def calculate_iou_aggregated(total_tp, total_fp, total_fn):
+    try:    
         # IoU
         iou = total_tp / (total_tp + total_fp + total_fn) if (total_tp + total_fp + total_fn) != 0 else np.nan
     except Exception as e:
-        logging.error(f"Error computing F-beta and IoU: {e}")
-        fbeta, iou = np.nan, np.nan
+        logging.error(f"Error computing IoU: {e}")
+        iou = np.nan
 
-    return fbeta, iou
+    return iou
 
 
-def calculate_precision_recall_accuracy_aggregated(total_tp, total_tn, total_fp, total_fn):
+
+def calculate_precision_sensitivity_specificity_accuracy_aggregated(total_tp, total_tn, total_fp, total_fn):
     """
-    Calculates precision, recall, and accuracy using aggregated TP, TN, FP, and FN.
+    Calculates using aggregated TP, TN, FP, and FN.
     """
     try:
         precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) != 0 else np.nan
-        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) != 0 else np.nan
-        accuracy = (total_tp + total_tn) / (total_tp + total_tn + total_fp + total_fn) if (total_tp + total_tn + total_fp + total_fn) != 0 else np.nan
-    except Exception as e:
-        logging.error(f"Error computing precision/recall/accuracy: {e}")
-        precision, recall, accuracy = np.nan, np.nan, np.nan
-    return precision, recall, accuracy
-
-
-def calculate_sensitivity_specificity_aggregated(total_tp, total_tn, total_fp, total_fn):
-    """
-    Calculates sensitivity and specificity from aggregated TP, TN, FP, and FN.
-    """
-    try:
         sensitivity = total_tp / (total_tp + total_fn) if (total_tp + total_fn) != 0 else np.nan
+        accuracy = (total_tp + total_tn) / (total_tp + total_tn + total_fp + total_fn) if (total_tp + total_tn + total_fp + total_fn) != 0 else np.nan
         specificity = total_tn / (total_tn + total_fp) if (total_tn + total_fp) != 0 else np.nan
     except Exception as e:
-        logging.error(f"Error computing aggregated sensitivity/specificity: {e}")
-        sensitivity, specificity = np.nan, np.nan
-    return sensitivity, specificity
+        logging.error(f"Error computing precision/sensitivity/accuracy: {e}")
+        precision, sensitivity, accuracy = np.nan, np.nan, np.nan
+    return precision, sensitivity, accuracy, specificity
+
 
 
 def calculate_hausdorff(mask_bool, pred_bool):
@@ -102,6 +85,9 @@ def calculate_hausdorff(mask_bool, pred_bool):
         logging.error(f"Error computing Hausdorff distances: {e}")
         hausdorff_full, hausdorff_95 = np.nan
     return hausdorff_full, hausdorff_95
+
+
+
 
 
 def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postprocess_function, device, metrics_dict):
@@ -125,7 +111,7 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
             logging.warning(f"Mask file {mask_file} not found, skipping.")
             continue
 
-        # Load image and mask, preprocess them
+        
         try:
             img = read_image_from_zip(test_dir, img_file)
             img_np = np.array(img)
@@ -141,12 +127,23 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
             logging.error(f"Error processing mask {filename}: {e}")
             continue
 
-        # Predict and post-process the prediction
+        #  predict and postprocess the prediction
         try:
             with torch.no_grad():
                 pred = model(img_tensor).cpu().numpy().squeeze()
+                # Handle model output shape (N, C, H, W) -> (C, H, W)
+
+                # Handle (H, W) shape by adding a channel dimension
+                if pred.ndim == 2:  # If shape is (H, W)
+                    pred = pred[np.newaxis, :, :]  # Add channel dimension, resulting in (1, H, W)
+
+                
+                if pred.ndim == 4:
+                    pred = pred.squeeze(0) 
+                
                 pred_postprocessed = postprocess_function(pred)
                 pred_binary = pred_postprocessed.astype(np.uint8)
+        
         except Exception as e:
             logging.error(f"Error during prediction for image {filename}: {e}")
             continue
@@ -154,13 +151,12 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
         pred_flat = pred_binary.flatten()
         mask_flat = mask_np.flatten()
 
-        # Calculate metrics for each class
+        # calculate metrics for each class (in future include more classes label.yaml file)
         for cls in [1, 0]:
             pred_cls = (pred_flat == cls).astype(np.uint8)
             mask_cls = (mask_flat == cls).astype(np.uint8)
 
-            # Dice Coefficient
-            #dice = calculate_dsc_aggregated(mask_cls, pred_cls) #(total_tp, total_fp, total_fn)
+
 
             # Hausdorff Distance
             mask_bool = mask_cls.reshape(mask_np.shape).astype(bool)
@@ -178,33 +174,30 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
                 logging.error(f"Error computing confusion matrix for image {filename}, class {cls}: {e}")
                 continue
 
-            # Store Dice and Hausdorff metrics
-            #metrics_dict['Dice Coefficient'].append((cls, dice))
+
             metrics_dict['Hausdorff Distance'].append((cls, hausdorff_full))
             metrics_dict['Hausdorff 95% Distance'].append((cls, hausdorff_95))
 
         logging.info(f"Processed image: {filename}")
 
-    # Calculate aggregated sensitivity, specificity, precision, recall, accuracy, F-beta, and IoU
+    # Calculate aggregated sensitivity, specificity, dice, recall, accuracy, F-beta, and IoU
     for cls in [1, 0]:
-        sensitivity, specificity = calculate_sensitivity_specificity_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
-        precision, recall, accuracy = calculate_precision_recall_accuracy_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
-        fbeta_05, iou = calculate_fbeta_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=0.5)
-        fbeta_2, _ = calculate_fbeta_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=2)
-        dsc = calculate_dsc_aggregated(total_tp[cls], total_fp[cls], total_fn[cls])
-
+        precision, sensitivity, accuracy, specificity = calculate_precision_sensitivity_specificity_accuracy_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
+        fbeta_05 = calculate_fbeta_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=0.5)
+        fbeta_2 = calculate_fbeta_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=2)
+        iou = calculate_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls])
+        dice= dice_coefficient(total_tp[cls], total_fp[cls], total_fn[cls])
 
         metrics_dict['Sensitivity'].append((cls, sensitivity))
         metrics_dict['Specificity'].append((cls, specificity))
         metrics_dict['Precision'].append((cls, precision))
-        metrics_dict['Recall'].append((cls, recall))
         metrics_dict['Accuracy'].append((cls, accuracy))
         metrics_dict['F-beta (beta=0.5)'].append((cls, fbeta_05))
         metrics_dict['F-beta (beta=2)'].append((cls, fbeta_2))
         metrics_dict['Jaccard Index (IoU)'].append((cls, iou))
-        metrics_dict['Dice Coefficient'].append((cls, dsc))
+        metrics_dict['Dice Coefficient'].append((cls, dice))
 
-    # Create DataFrame for Displaying Metrics
+    # Create DataFrame for Displaying Metrics # in future multi class 
     df = pd.DataFrame(columns=['Overall', 'Object Class', 'Background Class'], index=list(metrics_dict.keys()))
     for metric in metrics_dict.keys():
         object_scores = [score for cls, score in metrics_dict[metric] if cls == 1]
@@ -226,8 +219,7 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
     csv_file_path = f"{save_path}"
     df.to_csv(csv_file_path, index=False)
 
-
-    # Print the DataFrame 
+    # Print the DataFrame in Table Format
     try:
         import tabulate
         print(df.to_markdown(tablefmt="grid"))

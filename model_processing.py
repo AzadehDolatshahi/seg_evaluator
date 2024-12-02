@@ -8,22 +8,6 @@ import logging
 import importlib.util
 import sys
 
-def load_preprocess_postprocess(preprocess_postprocess_path: Path):
-    """
-    Dynamically loads preprocess and postprocess functions from a specified module.
-    """
-    try:
-        spec = importlib.util.spec_from_file_location("preprocess_postprocess_module", preprocess_postprocess_path)
-        preprocess_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(preprocess_module)
-        preprocess_function = getattr(preprocess_module, 'preprocess_function', None)
-        postprocess_function = getattr(preprocess_module, 'postprocess_function', None)
-        if not preprocess_function or not postprocess_function:
-            raise AttributeError("Preprocess or Postprocess functions not found in the module.")
-        return preprocess_function, postprocess_function
-    except Exception as e:
-        logging.error(f"Error loading preprocess/postprocess functions: {e}")
-        sys.exit(1)
 
 def load_model(model_path: Path, device: torch.device) -> torch.nn.Module:
     """
@@ -84,14 +68,3 @@ def read_mask_from_zip(zip_file: zipfile.ZipFile, file_name: str) -> np.ndarray:
         mask = Image.open(BytesIO(mask_data)).convert('1')  # Convert to binary
         mask_np = np.array(mask).astype(np.uint8)
         return mask_np
-
-# Example usage:
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.ERROR)
-    # Update these paths as necessary
-    preprocess_postprocess_path = Path('/path/to/your/preprocess_postprocess.py')
-    model_path = Path('/path/to/your/model.pt')  # Assuming a PyTorch model
-    device = torch.device('cpu')  # Use 'cuda' for GPU
-
-    preprocess, postprocess = load_preprocess_postprocess(preprocess_postprocess_path)
-    model = load_model(model_path, device)
