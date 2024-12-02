@@ -1,9 +1,9 @@
 paths:
-  test_dir: /Users/kashi/Downloads/retina_segmentation-2/test/image.zip
-  mask_dir: /Users/kashi/Downloads/retina_segmentation-2/test/mask.zip
-  model_path: /Users/kashi/Downloads/retina_segmentation-2/retina_model.pt 
-  preprocess_postprocess_path: /Users/kashi/Downloads/segmentation/preprocess_postprocess.py
-  output_csv: /Users/kashi/Downloads/segmentation/metrics_results_3.csv
+  test_dir: c:\Users\mohtashaa\Downloads\retina_segmentation_3\retina_segmentation\test\image.zip
+  mask_dir: c:\Users\mohtashaa\Downloads\retina_segmentation_3\retina_segmentation\test\annotations.zip
+  model_path: c:\Users\mohtashaa\Downloads\retina_segmentation_3\retina_segmentation\retina_model.pt 
+  preprocess_postprocess_path: c:\Users\mohtashaa\Downloads\retina_segmentation_3\retina_segmentation\image_preprocess.py
+  output_csv: c:\Users\mohtashaa\Downloads\retina_segmentation_3\retina_segmentation\metrics_results.csv
 
 device:
   name: cpu

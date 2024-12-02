@@ -13,7 +13,7 @@ def parse_arguments():
     """
     Parses command-line arguments.
     """
-    parser = argparse.ArgumentParser(description='Run Metrics on Retina Model')
+    parser = argparse.ArgumentParser(description='Run Metrics on Model')
     parser.add_argument('--config', type=str, required=True, help='Path to the YAML configuration file')
     return parser.parse_args()
 
@@ -39,22 +39,18 @@ def main():
         else:
             preprocess_postprocess_path = None
 
-        output_csv_path = Path(config['paths'].get('output_csv', 'metrics_results.csv'))
+        #output_csv_path = Path(config['paths'].get('output_csv', 'metrics_results.csv'))
         
     except KeyError as e:
         logger.error(f"Missing key in configuration file: {e}")
         exit(1)
 
-    # Later in your code, you should check if preprocess_postprocess_path is not None before using it
+    # 
     if preprocess_postprocess_path is not None:
         preprocess, postprocess = load_preprocess_postprocess(preprocess_postprocess_path)
     else:
-        # Set default or dummy functions or handle the lack of preprocessing/postprocessing
+        # handle the lack of preprocessing/postprocessing
         preprocess, postprocess = None, None
-
-    # Example of further usage
-    # if preprocess is not None:
-    #     processed_data = preprocess(your_data)
 
 
     # Load preprocess and postprocess functions
@@ -78,8 +74,7 @@ def main():
     # Run the actual metrics evaluation logic
     calculate_metrics(test_dir, mask_dir, model, preprocess_function, postprocess_function, device, metrics_dict)
 
-    # Optionally save the results
-    # Add logic to save CSV or print results here
+    #  save the results here
 
 if __name__ == '__main__':
     main()

@@ -30,7 +30,6 @@ def load_model(model_path, device='cpu'):
     based on the file extension and loads it appropriately.
     """
     try:
-        # Convert PosixPath to string if it's not already a string
         if isinstance(model_path, Path):
             model_path = str(model_path)
 
@@ -40,9 +39,17 @@ def load_model(model_path, device='cpu'):
             return model
         elif model_path.endswith('.pt') or model_path.endswith('.pth'):
             # Load a PyTorch model
-            model = torch.load(model_path, map_location=device)
-            model.eval().to(device)
-            return model
+            try:
+                # Try loading as a TorchScript model
+                model = torch.jit.load(model_path, map_location=device)
+                model.eval()
+                return model
+            except RuntimeError:
+                # Fallback to standard PyTorch model loading
+                model = torch.load(model_path, map_location=device)
+                model.eval()
+                model.to(device)
+                return model
         else:
             raise ValueError("Unsupported model file format. Use '.h5', '.keras' for Keras or '.pt', '.pth' for PyTorch")
     except Exception as e:

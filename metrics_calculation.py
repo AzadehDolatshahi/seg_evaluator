@@ -7,6 +7,7 @@ from surface_distance import compute_surface_distances, compute_robust_hausdorff
 from zip_utils import read_image_from_zip, read_mask_from_zip
 import logging
 import torch 
+import yaml
 
 
 def calculate_dsc_aggregated(total_tp, total_fp, total_fn):  # calculate_dsc_aggregated
@@ -219,9 +220,14 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
     df = df.apply(pd.to_numeric, errors='coerce')
     # Round DataFrame values to 4 decimal places
     df = df.round(4)
-    df.to_csv('/Users/kashi/Downloads/segmentation/metrics_results_3.csv') # change this to yml
+    with open('config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+    save_path = config['paths']['output_csv']
+    csv_file_path = f"{save_path}"
+    df.to_csv(csv_file_path, index=False)
 
-    # Print the DataFrame in Table Format
+
+    # Print the DataFrame 
     try:
         import tabulate
         print(df.to_markdown(tablefmt="grid"))
