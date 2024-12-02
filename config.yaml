@@ -1,7 +1,7 @@
 paths:
-  test_dir: /Users/kashi/Downloads/image.zip
-  mask_dir: /Users/kashi/Downloads/mask_1.zip
-  model_path: /Users/kashi/Downloads/retina_model.pt 
+  test_dir: /Users/kashi/Downloads/retina_segmentation-2/test/image.zip
+  mask_dir: /Users/kashi/Downloads/retina_segmentation-2/test/mask.zip
+  model_path: /Users/kashi/Downloads/retina_segmentation-2/retina_model.pt 
   preprocess_postprocess_path: /Users/kashi/Downloads/segmentation/preprocess_postprocess.py
   output_csv: /Users/kashi/Downloads/segmentation/metrics_results_3.csv
 

@@ -1,0 +1,7 @@
+torch>=2.4.0
+pandas>=2.2.2
+numpy>=1.26.4
+opencv-python>=4.10.0.84
+scikit-learn>=1.2.2
+surface-distance>=0.1
+pyyaml>=6.0.2
