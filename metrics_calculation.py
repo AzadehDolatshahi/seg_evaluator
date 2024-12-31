@@ -91,18 +91,37 @@ def calculate_hausdorff(mask_bool, pred_bool):
 
 
 def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postprocess_function, device, metrics_dict):
-    test_image_files = sorted([f for f in test_dir.namelist() if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff'))])
+    test_image_files = sorted([f for f in test_dir.namelist() 
+                               if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff'))])
 
     if not test_image_files:
         logging.warning(f"No test images found.")
         return
 
-    # Initialize accumulators for confusion matrix elements
-    total_tp = {0: 0, 1: 0}
-    total_tn = {0: 0, 1: 0}
-    total_fp = {0: 0, 1: 0}
-    total_fn = {0: 0, 1: 0}
+    #  all classes from the mask files 
+    all_classes = set()
+    for img_file in test_image_files:
+        mask_file = img_file.split('/')[-1]
+        if mask_file in mask_dir.namelist():
+            try:
+                mask_np = read_mask_from_zip(mask_dir, mask_file)
+                unique_labels = np.unique(mask_np)
+                all_classes.update(unique_labels)
+            except Exception as e:
+                logging.error(f"Error reading mask {mask_file}: {e}")
+                continue
 
+    # Sort classes so output is consistent
+    all_classes = sorted(all_classes)
+    logging.info(f"Detected classes: {all_classes}")
+
+    # initialize accumulators for confusion matrix elements 
+    total_tp = {cls: 0 for cls in all_classes}
+    total_tn = {cls: 0 for cls in all_classes}
+    total_fp = {cls: 0 for cls in all_classes}
+    total_fn = {cls: 0 for cls in all_classes}
+
+    # process each test image and compute confusion matrix, hausdorff,
     for img_file in test_image_files:
         filename = img_file.split('/')[-1]
         mask_file = filename
@@ -111,7 +130,7 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
             logging.warning(f"Mask file {mask_file} not found, skipping.")
             continue
 
-        
+        # Read and preprocess image
         try:
             img = read_image_from_zip(test_dir, img_file)
             img_np = np.array(img)
@@ -121,42 +140,38 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
             logging.error(f"Error processing image {filename}: {e}")
             continue
 
+        # Read mask
         try:
             mask_np = read_mask_from_zip(mask_dir, mask_file)
         except Exception as e:
             logging.error(f"Error processing mask {filename}: {e}")
             continue
 
-        #  predict and postprocess the prediction
+        # Predict and postprocess
         try:
             with torch.no_grad():
                 pred = model(img_tensor).cpu().numpy().squeeze()
-                # Handle model output shape (N, C, H, W) -> (C, H, W)
 
-                # Handle (H, W) shape by adding a channel dimension
-                if pred.ndim == 2:  # If shape is (H, W)
-                    pred = pred[np.newaxis, :, :]  # Add channel dimension, resulting in (1, H, W)
+                # Handle model output shape
+                if pred.ndim == 2:  # shape (H, W)
+                    pred = pred[np.newaxis, :, :]  # -> (1, H, W)
+                if pred.ndim == 4:  # shape (N, C, H, W)
+                    pred = pred.squeeze(0)         # -> (C, H, W)
 
-                
-                if pred.ndim == 4:
-                    pred = pred.squeeze(0) 
-                
                 pred_postprocessed = postprocess_function(pred)
                 pred_binary = pred_postprocessed.astype(np.uint8)
-        
         except Exception as e:
             logging.error(f"Error during prediction for image {filename}: {e}")
             continue
 
+        # Flatten predictions and mask
         pred_flat = pred_binary.flatten()
         mask_flat = mask_np.flatten()
 
-        # calculate metrics for each class (in future include more classes label.yaml file)
-        for cls in [1, 0]:
+        # compute metrics for each class 
+        for cls in all_classes:
             pred_cls = (pred_flat == cls).astype(np.uint8)
             mask_cls = (mask_flat == cls).astype(np.uint8)
-
-
 
             # Hausdorff Distance
             mask_bool = mask_cls.reshape(mask_np.shape).astype(bool)
@@ -165,28 +180,33 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
 
             # Confusion matrix values
             try:
-                tn, fp, fn, tp = confusion_matrix(mask_cls, pred_cls, labels=[0, 1]).ravel()
+                tn, fp, fn, tp = confusion_matrix(
+                    mask_cls, pred_cls, labels=[0, 1]
+                ).ravel()
                 total_tp[cls] += tp
                 total_tn[cls] += tn
                 total_fp[cls] += fp
                 total_fn[cls] += fn
             except Exception as e:
-                logging.error(f"Error computing confusion matrix for image {filename}, class {cls}: {e}")
+                logging.error(
+                    f"Error computing confusion matrix for image {filename}, class {cls}: {e}"
+                )
                 continue
-
 
             metrics_dict['Hausdorff Distance'].append((cls, hausdorff_full))
             metrics_dict['Hausdorff 95% Distance'].append((cls, hausdorff_95))
 
         logging.info(f"Processed image: {filename}")
 
-    # Calculate aggregated sensitivity, specificity, dice, recall, accuracy, F-beta, and IoU
-    for cls in [1, 0]:
-        precision, sensitivity, accuracy, specificity = calculate_precision_sensitivity_specificity_accuracy_aggregated(total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls])
+    # aggregate metrics at the end for each class
+    for cls in all_classes:
+        precision, sensitivity, accuracy, specificity = calculate_precision_sensitivity_specificity_accuracy_aggregated(
+            total_tp[cls], total_tn[cls], total_fp[cls], total_fn[cls]
+        )
         fbeta_05 = calculate_fbeta_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=0.5)
-        fbeta_2 = calculate_fbeta_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=2)
-        iou = calculate_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls])
-        dice= dice_coefficient(total_tp[cls], total_fp[cls], total_fn[cls])
+        fbeta_2  = calculate_fbeta_aggregated(total_tp[cls], total_fp[cls], total_fn[cls], beta=2)
+        iou      = calculate_iou_aggregated(total_tp[cls], total_fp[cls], total_fn[cls])
+        dice     = dice_coefficient(total_tp[cls], total_fp[cls], total_fn[cls])
 
         metrics_dict['Sensitivity'].append((cls, sensitivity))
         metrics_dict['Specificity'].append((cls, specificity))
@@ -197,33 +217,46 @@ def calculate_metrics(test_dir, mask_dir, model, preprocess_function, postproces
         metrics_dict['Jaccard Index (IoU)'].append((cls, iou))
         metrics_dict['Dice Coefficient'].append((cls, dice))
 
-    # Create DataFrame for Displaying Metrics # in future multi class 
-    df = pd.DataFrame(columns=['Overall', 'Object Class', 'Background Class'], index=list(metrics_dict.keys()))
+    # dataFrame with columns for each class plus an 'Overall' column ---
+    df_cols = ['Overall'] + [f"Class {cls}" for cls in all_classes]
+    df = pd.DataFrame(columns=df_cols, index=list(metrics_dict.keys()))
+
     for metric in metrics_dict.keys():
-        object_scores = [score for cls, score in metrics_dict[metric] if cls == 1]
-        background_scores = [score for cls, score in metrics_dict[metric] if cls == 0]
+        # Extract scores for each class
+        class_scores_dict = {cls: [] for cls in all_classes}
+        for (cls_label, score) in metrics_dict[metric]:
+            class_scores_dict[cls_label].append(score)
 
-        overall_score = np.nanmean(object_scores + background_scores) if (object_scores + background_scores) else np.nan
-        object_mean = np.nanmean(object_scores) if object_scores else np.nan
-        background_mean = np.nanmean(background_scores) if background_scores else np.nan
+        # Overall = mean across all classes
+        all_scores = []
+        for cls_label in all_classes:
+            all_scores.extend(class_scores_dict[cls_label])
+        overall_score = np.nanmean(all_scores) if all_scores else np.nan
 
-        df.loc[metric] = [overall_score, object_mean, background_mean]
+        # Mean for each class
+        row_values = [overall_score]
+        for cls_label in all_classes:
+            scores_for_cls = class_scores_dict[cls_label]
+            row_values.append(np.nanmean(scores_for_cls) if scores_for_cls else np.nan)
+
+        df.loc[metric] = row_values
 
     # Ensure all values in the DataFrame are numeric (or NaN)
     df = df.apply(pd.to_numeric, errors='coerce')
     # Round DataFrame values to 4 decimal places
     df = df.round(4)
+
+    # Read config and save CSV
     with open('config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     save_path = config['paths']['output_csv']
     csv_file_path = f"{save_path}"
     df.to_csv(csv_file_path, index=False)
 
-    # Print the DataFrame in Table Format
+    # Print DataFrame in table format if tabulate is available
     try:
         import tabulate
         print(df.to_markdown(tablefmt="grid"))
     except ImportError:
         logging.warning("tabulate module not found. Printing DataFrame using default format.")
         print(df)
-
